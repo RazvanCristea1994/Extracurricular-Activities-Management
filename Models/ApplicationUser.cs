@@ -22,7 +22,5 @@ namespace ExtracurricularActivitiesManagement.Models
         public String LastName { get; set; }
         [Required]
         public DateTime BirthDate { get; set; }
-        [Required]
-        public GenderType Gender { get; set; }
     }
 }

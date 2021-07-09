@@ -1,12 +1,16 @@
 ﻿using AutoMapper;
 using ExtracurricularActivitiesManagement.Data;
 using ExtracurricularActivitiesManagement.Models;
+using ExtracurricularActivitiesManagement.Services.ServicesInterfaces;
 using ExtracurricularActivitiesManagement.ViewModels.Activity;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace ExtracurricularActivitiesManagement.Controllers
@@ -15,37 +19,92 @@ namespace ExtracurricularActivitiesManagement.Controllers
     [ApiController]
     public class ActivitiesController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IActivityService _activityService;
 
-        public ActivitiesController(ApplicationDbContext context, IMapper mapper)
+        public ActivitiesController(IMapper mapper, UserManager<ApplicationUser> userManager, IActivityService activityService)
         {
-            _context = context;
             _mapper = mapper;
+            _userManager = userManager;
+            _activityService = activityService;
         }
 
+        /// <summary>
+        /// Creates an activity
+        /// <remarks>
+        /// Sample request:
+        /// Post /api/activities
+        /// {
+        ///     "name": "Rugby";
+        ///     "description": "Only for 5th grade or upper";
+        /// }
+        /// </remarks>
+        /// </summary>
+        /// <param name="activityRequest"></param>
+        /// <returns></returns>
         [HttpPost]
+        [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
         public async Task<ActionResult<Activity>> PostActivity(ActivityViewModel activityRequest)
         {
-            Activity activity = _mapper.Map<Activity>(activityRequest);
-            _context.Activities.Add(activity);
-            await _context.SaveChangesAsync();
+            var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+            {
+                return StatusCode(403);
+            }
 
-            return CreatedAtAction("GetActivity", new { id = activity.Id }, activity);
+            var activityEntity = _mapper.Map<Activity>(activityRequest);
+            
+            var activityResponse = await _activityService.CreateActivity(activityEntity);
+
+            if (activityResponse.ResponseError == null)
+            {
+                return CreatedAtAction("GetStory", new { id = activityEntity.Id }, activityRequest);
+            }
+
+            return StatusCode(500);
         }
 
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<ActivityWithTeachersViewModel>>> GetActivities()
+
+        [HttpPost("{id}/activities")]
+        [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+        public async Task<IActionResult> PostActivityForTeacher(int id, ActivityViewModel activity)
         {
-            return await _context.Activities
-                            .Include(a => a.Teachers)
-                            .Select(a => _mapper.Map<ActivityWithTeachersViewModel>(a)).ToListAsync();
+            var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+            {
+                return StatusCode(403);
+            }
+
+            var commentResponse = await _activityService.AddActivityToTeacher(id, _mapper.Map<Activity>(activity));
+
+            if (commentResponse.ResponseError == null)
+            {
+                return Ok();
+            }
+
+            return StatusCode(500);
         }
+
+        [HttpGet("activities")]
+		public async Task<ActionResult<List<ActivityViewModel>>> GetActivities()
+		{
+			var response = await _activityService.GetActivities();
+			var activities = response.ResponseOk;
+
+			if (activities == null)
+			{
+				return NotFound();
+			}
+
+			return activities;
+		}
 
         [HttpGet("{id}")]
         public async Task<ActionResult<ActivityViewModel>> GetActivity(int id)
         {
-            var activity = await _context.Activities.FindAsync(id);
+            var response = await _activityService.GetActivity(id);
+            var activity = response;
 
             if (activity == null)
             {
@@ -54,63 +113,76 @@ namespace ExtracurricularActivitiesManagement.Controllers
             return _mapper.Map<ActivityViewModel>(activity);
         }
 
-        [HttpGet]
-        [Route("filterByType/{activityType}")]
-        public async Task<ActionResult<IEnumerable<ActivityViewModel>>> FilterByType(string activityType)
+        [HttpPut("activities/{activityId}")]
+        [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+        public async Task<IActionResult> PutActivity(int activityId, ActivityViewModel activity)
         {
-            return await _context.Activities
-                .Where(a => a.ActivityType.Equals(activityType))
-                .Select(a => _mapper.Map<ActivityViewModel>(a))
-                .ToListAsync();
-        }
+            var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+            {
+                return StatusCode(403);
+            }
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutActivity(int id, ActivityViewModel activity)
-        {
-            if (id != activity.Id)
+            if (activityId != activity.Id)
             {
                 return BadRequest();
             }
 
-            _context.Entry(_mapper.Map<Activity>(activity)).State = EntityState.Modified;
+            var commentResponse = await _activityService.UpdateActivity(_mapper.Map<Activity>(activity));
 
-            try
+            if (commentResponse.ResponseError == null)
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!ActivityExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
+                return NoContent();
             }
 
-            return NoContent();
+            return StatusCode(500);
         }
 
-        private bool ActivityExists(int id)
+
+        [HttpDelete("{id}/activities/{activityId}")]
+        [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+        public async Task<IActionResult> RemoveActivityFromTeacher(int id, int activityId)
         {
-            return _context.Activities.Any(a => a.Id == id);
+            var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+            {
+                return StatusCode(403);
+            }
+
+            var serviceResponse = await _activityService.RemoveActivityFromTeacher(id, activityId);
+
+            if (serviceResponse.ResponseError == null)
+            {
+                return Ok();
+            }
+
+            return StatusCode(500);
         }
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteActivity(int id)
+        [HttpDelete("Tags/{tagId}")]
+        [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+        public async Task<IActionResult> DeleteActivity(int activityId)
         {
-            var activity = await _context.Activities.FindAsync(id);
-            if (activity == null)
+            var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+            {
+                return StatusCode(403);
+            }
+
+            if (!_activityService.ActivityExists(activityId))
             {
                 return NotFound();
             }
 
-            _context.Activities.Remove(activity);
-            await _context.SaveChangesAsync();
+            var result = await _activityService.DeleteActivity(activityId);
 
-            return NoContent();
+            if (result.ResponseError == null)
+            {
+                return NoContent();
+            }
+
+            return StatusCode(500);
         }
+
     }
 }

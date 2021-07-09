@@ -13,6 +13,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using FluentValidation;
+using FluentValidation.AspNetCore;
+using System;
+using ExtracurricularActivitiesManagement.ViewModels.ScheduledActivitya;
+using ExtracurricularActivitiesManagement.UiValidators;
+using ExtracurricularActivitiesManagement.ViewModels.Activity;
+using ExtracurricularActivitiesManagement.ViewModels.TeacherViews;
+using Microsoft.OpenApi.Models;
+using System.Reflection;
+using System.IO;
 
 namespace ExtracurricularActivitiesManagement
 {
@@ -35,7 +45,9 @@ namespace ExtracurricularActivitiesManagement
             services.AddDatabaseDeveloperPageExceptionFilter();
 
             services.AddDefaultIdentity<ApplicationUser>(options => options.SignIn.RequireConfirmedAccount = true)
-                .AddEntityFrameworkStores<ApplicationDbContext>();
+                    .AddRoles<IdentityRole>()
+                    .AddEntityFrameworkStores<ApplicationDbContext>()
+                    .AddDefaultTokenProviders();
 
             services.AddIdentityServer()
                 .AddApiAuthorization<ApplicationUser, ApplicationDbContext>();
@@ -63,11 +75,36 @@ namespace ExtracurricularActivitiesManagement
             {
                 configuration.RootPath = "ClientApp/dist";
             });
+
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo
+                {
+                    Version = "v1",
+                    Title = "Stories API",
+                    Description = "A simple example ASP.NET Core Web API",
+                });
+
+                c.CustomSchemaIds(type => type.ToString());
+            });
+
+            services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
+            services.AddTransient<IValidator<ScheduledActivityViewModel>, ScheduledActivityValidator>();
+            services.AddTransient<IValidator<ActivityViewModel>, ActivityValidator>();
+            services.AddTransient<IValidator<ActivityWithTeachersViewModel>, ActivityWithTeachersValidator>();
+            services.AddTransient<IValidator<TeachersWithActivitiesViewModel>, TeacherValidation>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
+            app.UseSwagger();
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
+                c.RoutePrefix = string.Empty;
+            });
+
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();

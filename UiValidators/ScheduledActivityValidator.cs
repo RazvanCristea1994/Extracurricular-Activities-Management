@@ -26,13 +26,18 @@ namespace ExtracurricularActivitiesManagement.UiValidators
 			RuleFor(m => m.StartTime).LessThan(m => m.EndTime).WithMessage("The start time must be earlier than the end time.");
 			RuleFor(m => m.StartTime).GreaterThan(DateTime.UtcNow).WithMessage("The start time must be in the future.");
 			RuleFor(m => m.StartTime.AddMinutes(-m.TimezoneOffsetMinutes)).Must(StartWithinDayTime).WithMessage("Events must start within day time (9-20).");
-			RuleFor(m => m.EndTime.AddMinutes(-m.TimezoneOffsetMinutes)).Must(StartWithinDayTime).WithMessage("Events must end within day time (9-20).");
-			RuleFor(m => new { m.StartTime, m.EndTime }).Must(x => !HaveOverlappingEvents(x.StartTime, x.EndTime)).WithMessage("This event overlaps with a different one.");
+			RuleFor(m => m.EndTime.AddMinutes(-m.TimezoneOffsetMinutes)).Must(EndWithinDayTime).WithMessage("Events must end within day time (9-20).");
+			RuleFor(m => new { m.StartTime, m.EndTime }).Must(x => !HaveOverlappingEvents(x.StartTime, x.EndTime)).WithMessage("This event overlaps with another one.");
 		}
 
 		private bool StartWithinDayTime(DateTime datetime)
 		{
-			return datetime.Hour >= 9 && datetime.Hour < 19;
+			return datetime.Hour >= 9 && datetime.Hour < 20;
+		}
+
+		private bool EndWithinDayTime(DateTime datetime)
+		{
+			return datetime.Hour >= 9 && datetime.Hour < 21;
 		}
 
 		private bool HaveOverlappingEvents(DateTime startTime, DateTime endTime)

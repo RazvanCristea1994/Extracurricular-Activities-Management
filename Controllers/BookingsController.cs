@@ -1,5 +1,9 @@
-﻿using ExtracurricularActivitiesManagement.Data;
+﻿using AutoMapper;
+using ExtracurricularActivitiesManagement.Data;
 using ExtracurricularActivitiesManagement.Models;
+using ExtracurricularActivitiesManagement.Services.ServicesInterfaces;
+using ExtracurricularActivitiesManagement.ViewModels.Booking;
+using ExtracurricularActivitiesManagement.ViewModels.Pagination;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -16,41 +20,47 @@ namespace ExtracurricularActivitiesManagement.Controllers
     [ApiController]
     public class BookingsController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IBookingService _bookingService;
+        private IMapper _mapper;
+        private readonly IScheduledActivity _scheduledActivityService;
 
-        public BookingsController(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
+        public BookingsController(UserManager<ApplicationUser> userManager, IBookingService bookingService, IMapper mapper, IScheduledActivity scheduledActivityService)
         {
-            _context = context;
             _userManager = userManager;
+            _bookingService = bookingService;
+            _mapper = mapper;
+            _scheduledActivityService = scheduledActivityService;
         }
 
         [HttpPost("BookSpot")]
         [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
-        public async Task<ActionResult<Booking>> BookSpot(ScheduledActivity activity)
+        public async Task<ActionResult<BookingViewModel>> BookSpot(ScheduledActivity scheduledActivity)
         {
             var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+           
+            var response = await _bookingService.BookSpot(scheduledActivity, user);
 
-            var booking = new Booking { ScheduledActivityId = activity.Id, UserId = user.Id };
-            _context.Bookings.Add(booking);
-            activity.Capacity--;
+            if (response.ResponseError == null)
+            {
+                return Ok();
+            }
 
-            _context.Entry(activity).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction("GetBooking", new { id = booking.Id }, booking);
+            return StatusCode(500);
         }
 
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Booking>>> GetBookings()
+        [HttpGet("bookings")]
+        public async Task<ActionResult<PaginatedResultSet<BookingViewModel>>> GetBookings()
         {
-            return await _context.Bookings.ToListAsync();
+            var result = await _bookingService.GetBookings();
+            return result.ResponseOk;
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Booking>> GetBooking(int id)
+        public async Task<ActionResult<BookingViewModel>> GetBooking(int id)
         {
-            var booking = await _context.Bookings.FindAsync(id);
+            var response = await _bookingService.GetBooking(id);
+            var booking = response.ResponseOk;
 
             if (booking == null)
             {
@@ -62,17 +72,16 @@ namespace ExtracurricularActivitiesManagement.Controllers
 
         [HttpGet("ScheduledActivity/{scheduledActivityId}")]
         [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
-        public async Task<ActionResult<Booking>> GetUserBooking(int scheduledActivityId)
+        public async Task<ActionResult<BookingViewModel>> GetUserBooking(int scheduledActivityId)
         {
             var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            var booking = await _context.Bookings
-                .Where(b => b.UserId == user.Id && b.ScheduledActivityId == scheduledActivityId)
-                .FirstOrDefaultAsync();
+            var response = await _bookingService.GetUserBooking(scheduledActivityId, user);
+            var booking = response.ResponseOk;
 
             if (booking == null)
             {
-                return new EmptyResult();
+                return NotFound();
             }
 
             return booking;
@@ -80,18 +89,19 @@ namespace ExtracurricularActivitiesManagement.Controllers
 
         [HttpGet("/Bookings/Current")]
         [Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
-        public async Task<ActionResult<IEnumerable<Booking>>> GetBookingsForCurrentUser()
+        public async Task<ActionResult<PaginatedResultSet<BookingViewModel>>> GetBookingsForCurrentUser()
         {
             var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            if (user == null)
+            var response = await _bookingService.GetBookingsForCurrentUser(user);
+            var booking = response.ResponseOk;
+
+            if (booking == null)
             {
-                return new List<Booking>();
+                return NotFound();
             }
 
-            return await _context.Bookings
-                .Where(b => b.UserId == user.Id)
-                .ToListAsync();
+            return booking;
         }
 
         // DELETE: api/Bookings/5
@@ -101,25 +111,19 @@ namespace ExtracurricularActivitiesManagement.Controllers
         {
             var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
 
-            if (user == null)
+            if (!_bookingService.BookingExists(id))
             {
                 return NotFound();
             }
 
-            var booking = await _context.Bookings.FindAsync(id);
-            if (booking == null)
+            var result = await _bookingService.DeleteBooking(id, user);
+
+            if (result.ResponseError == null)
             {
-                return NotFound();
+                return NoContent();
             }
 
-            _context.Bookings.Remove(booking);
-            var activity = _context.ScheduledActivities.Find(booking.ScheduledActivityId);
-            activity.Capacity++;
-            _context.Entry(activity).State = EntityState.Modified;
-
-            await _context.SaveChangesAsync();
-
-            return NoContent();
+            return StatusCode(500);
         }
 
     }

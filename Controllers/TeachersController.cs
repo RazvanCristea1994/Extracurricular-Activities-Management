@@ -1,12 +1,17 @@
 ﻿using AutoMapper;
 using ExtracurricularActivitiesManagement.Data;
 using ExtracurricularActivitiesManagement.Models;
+using ExtracurricularActivitiesManagement.Services.ServicesInterfaces;
+using ExtracurricularActivitiesManagement.ViewModels.Pagination;
 using ExtracurricularActivitiesManagement.ViewModels.TeacherViews;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace ExtracurricularActivitiesManagement.Controllers
@@ -15,144 +20,109 @@ namespace ExtracurricularActivitiesManagement.Controllers
     [ApiController]
     public class TeachersController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
-        public TeachersController(ApplicationDbContext context, IMapper mapper)
+        private readonly ITeacherService _teacherService;
+		private readonly UserManager<ApplicationUser> _userManager;
+
+		public TeachersController(IMapper mapper, ITeacherService teacherManagementService, UserManager<ApplicationUser> userManager)
         {
-            _context = context;
             _mapper = mapper;
+            _teacherService = teacherManagementService;
+			_userManager = userManager;
         }
 
-        [HttpPost]
-        public async Task<ActionResult<Teacher>> PostTrainer(TeachersWithActivitiesViewModel trainer)
-        {
-            var trainerEntity = _mapper.Map<Teacher>(new Teacher());
-            trainerEntity.Id = trainer.Id;
-            trainerEntity.FirstName = trainer.FirstName;
-            trainerEntity.LastName = trainer.LastName;
-            trainerEntity.Description = trainer.Description;
+		[HttpPost]
+		[Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+		public async Task<ActionResult<Teacher>> PostTeacher(TeacherViewModel teacher)
+		{
+			var user = await _userManager.FindByNameAsync(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+			if (!await _userManager.IsInRoleAsync(user, UserRole.ROLE_ADMIN))
+			{
+				return StatusCode(403);
+			}
 
-            if (trainer.Activities.Count != 0)
-            {
-                List<Activity> activities = new List<Activity>();
-                trainer.Activities.ForEach(activityId =>
-                {
-                    var activity = _context.Activities.Find(activityId);
-                    if (activity != null)
-                    {
-                        activities.Add(activity);
-                    }
-                });
+			var teacherEntity = _mapper.Map<Teacher>(teacher);
+			
+			var teacherResponse = await _teacherService.CreateTeacher(teacherEntity);
 
-                if (activities.Count == 0)
-                {
-                    return BadRequest("The activities you provided are not available.");
-                }
-                trainerEntity.Activities = activities;
-            }
+			if (teacherResponse.ResponseError == null)
+			{
+				return CreatedAtAction("GetTeacher", new { id = teacherEntity.Id }, teacher);
+			}
 
-            _context.Teachers.Add(trainerEntity);
-            await _context.SaveChangesAsync();
-            return CreatedAtAction("GetTrainer", new { id = trainer.Id }, trainer);
-        }
+			return StatusCode(500);
+		}
 
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<TeacherViewModel>>> GetTrainers()
-        {
-            return await _context.Teachers
-                .OrderBy(t => t.LastName)
-                .Include(t => t.Activities)
-                .Select(t => _mapper.Map<TeacherViewModel>(t))
-                .ToListAsync();
-        }
+		[HttpGet]
+		public async Task<ActionResult<PaginatedResultSet<TeacherViewModel>>> GetTeachers()
+		{
+			var result = await _teacherService.GetTeachers();
+			return result.ResponseOk;
+		}
 
-        [HttpGet("{id}")]
-        public async Task<ActionResult<TeacherViewModel>> GetTrainer(int id)
-        {
-            var trainer = await _context.Teachers.Include(t => t.Activities).FirstOrDefaultAsync(t => t.Id == id);
+		[HttpGet("{id}")]
+		public async Task<ActionResult<TeacherViewModel>> GetTeacher(int id)
+		{
+			var response = await _teacherService.GetTeacher(id);
+			var teacher = response.ResponseOk;
 
-            if (trainer == null)
-            {
-                return NotFound();
-            }
+			if (teacher == null)
+			{
+				return NotFound();
+			}
 
-            return _mapper.Map<TeacherViewModel>(trainer);
-        }
+			return teacher;
+		}
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutTrainer(TeachersWithActivitiesViewModel trainerFromUi)
-        {
-            var trainerToUpdate = _context.Teachers
-                .Include(t => t.Activities)
-                .FirstOrDefault(t => t.Id == trainerFromUi.Id);
+		[HttpGet]
+		[Route("filter/{activityId}")]
+		public async Task<ActionResult<PaginatedResultSet<TeacherViewModel>>> GetFilteredTeachers(int activityId, int? page = 1, int? perPage = 10)
+		{
+			var result = await _teacherService.GetFilteredTeachers(activityId, page, perPage);
+			return result.ResponseOk;
+		}
 
-            if (trainerToUpdate == null)
-            {
-                return NotFound();
-            }
+		[HttpPut("{id}")]
+		[Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+		public async Task<IActionResult> PutTeacher(int id, TeacherViewModel teacher)
+		{
+			if (id != teacher.Id)
+			{
+				return BadRequest();
+			}
 
-            if (trainerFromUi.Activities.Count != 0)
-            {
-                var activitiesToRemove = trainerToUpdate.Activities.ToList();
-                activitiesToRemove.ForEach(activity =>
-                {
-                    if (!trainerFromUi.Activities.Contains(activity.Id))
-                    {
-                        trainerToUpdate.Activities.Remove(activity);
-                    }
-                });
-                trainerFromUi.Activities.ForEach(activityId =>
-                {
-                    var activityToAdd = _context.Activities.Find(activityId);
-                    if (activityToAdd != null && !trainerToUpdate.Activities.Exists(a => a.Id == activityToAdd.Id))
-                    {
-                        trainerToUpdate.Activities.Add(activityToAdd);
-                    }
-                });
-            }
-            else
-            {
-                trainerToUpdate.Activities.Clear();
-            }
-            var newActivities = trainerToUpdate.Activities;
+			var response = await _teacherService.UpdateTeacher(_mapper.Map<Teacher>(teacher));
 
-            trainerToUpdate.Id = trainerFromUi.Id;
-            trainerToUpdate.FirstName = trainerFromUi.FirstName;
-            trainerToUpdate.LastName = trainerFromUi.LastName;
-            trainerToUpdate.Description = trainerFromUi.Description;
-            trainerToUpdate.Activities = newActivities;
+			if (response.ResponseError == null)
+			{
+				return NoContent();
+			}
 
-            _context.Entry(trainerToUpdate).State = EntityState.Modified;
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                throw;
-            }
+			if (!_teacherService.TeacherExists(id))
+			{
+				return NotFound();
+			}
 
-            return NoContent();
-        }
+			return StatusCode(500);
+		}
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteTrainer(int id)
-        {
-            var trainer = await _context.Teachers.FindAsync(id);
-            if (trainer == null)
-            {
-                return NotFound();
-            }
+		[HttpDelete("{id}")]
+		[Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+		public async Task<IActionResult> DeleteTeacher(int id)
+		{
+			if (!_teacherService.TeacherExists(id))
+			{
+				return NotFound();
+			}
 
-            _context.Teachers.Remove(trainer);
-            await _context.SaveChangesAsync();
+			var result = await _teacherService.DeleteTeacher(id);
 
-            return NoContent();
-        }
+			if (result.ResponseError == null)
+			{
+				return NoContent();
+			}
 
-        private bool TrainerExists(int id)
-        {
-            return _context.Teachers.Any(e => e.Id == id);
-        }
-    }
+			return StatusCode(500);
+		}
+	}
 }

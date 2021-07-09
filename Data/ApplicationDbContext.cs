@@ -30,7 +30,7 @@ namespace ExtracurricularActivitiesManagement.Data
             base.OnModelCreating(modelBuilder);
 
             modelBuilder.Entity<Activity>().Property(a => a.Id).IsRequired();
-            modelBuilder.Entity<Activity>().Property(a => a.ActivityType).IsRequired();
+            modelBuilder.Entity<Activity>().Property(a => a.Name).IsRequired();
             modelBuilder.Entity<Activity>().Property(a => a.Description).IsRequired();
             modelBuilder.Entity<Activity>().Property(a => a.PrimaryColour).IsRequired();
             modelBuilder.Entity<Activity>().Property(a => a.SecondaryColour).IsRequired();
@@ -51,7 +51,6 @@ namespace ExtracurricularActivitiesManagement.Data
             modelBuilder.Entity<ApplicationUser>().Property(u => u.FirstName).IsRequired();
             modelBuilder.Entity<ApplicationUser>().Property(u => u.LastName).IsRequired();
             modelBuilder.Entity<ApplicationUser>().Property(u => u.BirthDate).IsRequired();
-            modelBuilder.Entity<ApplicationUser>().Property(u => u.Gender).IsRequired();
 
             modelBuilder.Entity<UserRole>()
                 .HasData(new UserRole { Name = UserRole.ROLE_STUDENT, NormalizedName = UserRole.ROLE_STUDENT.ToUpper() },
